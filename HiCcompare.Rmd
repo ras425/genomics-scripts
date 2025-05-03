@@ -1,0 +1,92 @@
+---
+title: "HiCcompare"
+author: "Carol Wu"
+date: "2024-06-21"
+output: html_document
+---
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("biomaRt")
+```
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("edgeR")
+```
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("HiCcompare")
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(readxl)
+library(dplyr)
+library(biomaRt)
+library(edgeR)
+library(HiCcompare)
+```
+
+# read in files
+```{r}
+# first dataset
+mat1 <- read.table("/Users/riyashah/500000/WT_Veh_500000.matrix")
+bed1 <- read.table("/Users/riyashah/500000/WT_Veh_500000_abs.bed")
+dat1 <- hicpro2bedpe(mat1, bed1)
+dat1 <- dat1$cis # extract intrachromosomal matrices
+# second dataset
+mat2 <- read.table("/Users/riyashah/500000/WT_GW_500000.matrix")
+bed2 <- read.table("/Users/riyashah/500000/WT_GW_500000_abs.bed")
+dat2 <- hicpro2bedpe(mat2, bed2)
+dat2 <- dat2$cis # extract intrachromosomal matrices
+
+# for all chromosomes
+hic.list <- mapply(create.hic.table, dat2, dat1, SIMPLIFY = FALSE, scale = FALSE)
+```
+
+```{r}
+# Print names to identify chrM
+print(names(hic.list))
+
+# Remove chrM from hic.list
+hic.list <- hic.list[!grepl("chrM", names(hic.list))]
+
+# Optionally, verify the list after removal
+print(names(hic.list))
+```
+
+```{r}
+hic.list <- total_sum(hic.list)
+# Two Hi-C matrices were jointly normalized for each chromosome
+hic.list <- hic_loess(hic.list, parallel = FALSE)
+#hic.list <- hic_loess(hic.list, Plot=TRUE, parallel=TRUE)
+# The interactions with low average expression were filtered out with A.min=15
+hic.list <- hic_compare(hic.list, A.min = 15, adjust.dist = TRUE, p.method = 'fdr', Plot = TRUE, parallel = FALSE)
+
+hic.list <- do.call(rbind, hic.list)
+
+hic.list <- hic.list[hic.list$p.adj<0.05,]
+
+write.table(hic.list,"differential interaction sept FXR WT veh vs gw.txt")
+```
+
+```{r}
+# for chr1
+hic.table <- create.hic.table(dat1[[1]], dat2[[1]])
+
+# Jointly normalize data for a single chromosome
+hic.table <- hic_loess(hic.table, Plot = TRUE, Plot.smooth = FALSE)
+
+hic.table <- hic_compare(hic.table, A.min = 15, adjust.dist = TRUE, p.method = 'fdr', Plot = TRUE)
+```
+
+
