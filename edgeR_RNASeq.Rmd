@@ -1,0 +1,112 @@
+---
+title: "edgeR_RNASeq"
+output: html_document
+---
+
+```{r}
+BiocManager::install(version = "3.18")
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(readODS)
+library(dplyr)
+library(biomaRt)
+library(edgeR)
+```
+
+```{r}
+# load ensembl for gene names
+ensembl <- useMart(biomart = "ensembl", dataset="hsapiens_gene_ensembl")
+
+```
+
+```{r}
+# load master matrix
+master_data <- read_ods("/Users/riyashah/Downloads/master.ods")
+```
+
+```{r}
+# for human
+# Get gene names corresponding to ensemble IDs
+# change dataset name (values & last line)
+# gene_names <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+#                    filters = "ensembl_gene_id",
+#                    values = master_data$gene_id,
+#                    mart = ensembl)
+# Create a mapping between ensemble IDs and gene names
+# id_to_name <- setNames(gene_names$external_gene_name, gene_names$ensembl_gene_id)
+# Replace ensemble gene IDs with gene names in the dataframe
+# master_data$gene_name <- id_to_name[master_data$gene_id]
+```
+
+
+```{r}
+library(org.Mm.eg.db)
+mapIds(
+  org.Mm.eg.db,
+  keys = master_data$gene_id,
+  column = 'SYMBOL',
+  keytype = 'ENSEMBL',
+  multiVals = "first")
+
+id_to_name<-select(
+  org.Mm.eg.db,
+  keys = master_data$gene_id,
+  column = c('SYMBOL', 'ENTREZID', 'ENSEMBL'),
+  keytype = 'ENSEMBL')
+
+master_data <- merge(master_data, id_to_name, by.x = "gene_id", by.y = "ENSEMBL",all = TRUE)
+
+```
+
+```{r Combined Function}
+edgrFunction <- function(input_matrix,output_csv, FDRcutoff, ConditionAColumnNumbers, ConditionBColumnNumbers){
+  
+rawdata <- input_matrix
+head(rawdata)
+library(edgeR)
+y <- DGEList(counts=rawdata[,c(ConditionAColumnNumbers,ConditionBColumnNumbers)], genes=rawdata["SYMBOL"])
+dim(y)
+o <- order(rowSums(y$counts))
+y <- y[o,]
+#keep <- rowSums(cpm(y)>40) >= 8
+#y <- y[keep,]
+#nrow(y)
+y$samples$lib.size <- colSums(y$counts)
+rownames(y$counts) <- rownames(y$genes) <- y$genes$SYMBOL
+y$genes$SYMBOL <- NULL
+y <- calcNormFactors(y)
+y$samples
+plotMDS(y)
+Condition <- factor(c("M","M","M","Mo","Mo","Mo")) #the number of K and W must match the amount of columns in each of the groups being compared
+data.frame(Sample=colnames(y),Condition)
+design <- model.matrix(~Condition)
+rownames(design) <- colnames(y)
+y <- estimateGLMCommonDisp(y, design, verbose=TRUE)
+y <- estimateGLMTrendedDisp(y, design)
+y <- estimateGLMTagwiseDisp(y, design)
+fit <- glmFit(y, design)
+lrt <- glmLRT(fit)
+final_genelist <- topTags(lrt, n = 1000)
+o <- order(lrt$table$PValue)
+cpm(y)[o[1:10],]
+summary(de <- decideTestsDGE(lrt))
+detags <- rownames(y)[as.logical(de)]
+plotSmear(lrt, de.tags=detags)
+abline(h=c(-1, 1), col="blue")
+filtered_genelist <- final_genelist$table %>%
+  filter(FDR < FDRcutoff)
+write.csv(filtered_genelist, output_csv)
+}
+```
+
+
+```{r}
+edgrFunction(master_data, "Foxa2_MAFLD.csv", 0.10 , 2:4, 5:7)
+#function inputs include the name of the count file, the name of the output file, the FDR setting, and then the columns to compare
+```
+
+
