@@ -1,1 +1,1 @@
-# genomics-scripts
+# genomics scripts
